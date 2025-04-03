@@ -32,7 +32,7 @@ USER_RATINGS_PATH = "data/user_ratings_updated.csv"
 TMDB_API_KEY = "2ba15ae1f0efd5257e6b44cb8bad748a"
 BASE_URL_TMDB = "https://api.themoviedb.org/3"
 IMAGE_BASE_URL_TMDB = "https://image.tmdb.org/t/p/w500"
-DEFAULT_POSTER = "https://via.placeholder.com/200x300?text=Poster+Indisponible"
+DEFAULT_POSTER = "data/default.jpg"
 os.makedirs(USERS_DIR, exist_ok=True)
 
 # ---- STYLES ----
@@ -229,7 +229,7 @@ def get_movie_poster(movie_title):
         params = {
             "api_key": TMDB_API_KEY,
             "query": movie_title,
-            "language": "fr-FR"
+            "language": "en-US"
         }
         response = requests.get(search_url, params=params)
         response.raise_for_status()
@@ -256,7 +256,7 @@ def get_movie_details(movie_title):
         params = {
             "api_key": TMDB_API_KEY,
             "query": movie_title,
-            "language": "fr-FR"
+            "language": "en-US"
         }
         response = requests.get(search_url, params=params)
         response.raise_for_status()
@@ -274,7 +274,7 @@ def get_movie_details(movie_title):
         details_url = f"{BASE_URL_TMDB}/movie/{movie_id}"
         details_params = {
             "api_key": TMDB_API_KEY,
-            "language": "fr-FR",
+            "language": "en-US",
             "append_to_response": "credits"
         }
         details_response = requests.get(details_url, params=details_params)
@@ -745,7 +745,16 @@ def profile_section():
                     movie_data = df[df['movie_title'] == movie].iloc[0]
                     with cols[i % 3]:
                         poster_url = get_movie_poster(movie)
-                        st.image(poster_url, use_container_width=True)
+                        
+                        try:
+                            if poster_url.startswith(('http://', 'https://')):
+                                st.image(poster_url, width=200)
+                            else:
+                                st.image(DEFAULT_POSTER, width=200)
+                        except Exception as e:
+                            st.error(f"Impossible de charger l'image : {str(e)}")
+                            st.image(DEFAULT_POSTER, width=200)
+
                         st.write(f"**{movie}**")
                         st.write(f"⭐" * rating)
                         genres = movie_data['genres'].split('|')[:3]
