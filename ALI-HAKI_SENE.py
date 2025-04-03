@@ -745,7 +745,7 @@ def profile_section():
                     movie_data = df[df['movie_title'] == movie].iloc[0]
                     with cols[i % 3]:
                         poster_url = get_movie_poster(movie)
-                        st.image(poster_url, use_column_width=True)
+                        st.image(poster_url, use_container_width=True)
                         st.write(f"**{movie}**")
                         st.write(f"⭐" * rating)
                         genres = movie_data['genres'].split('|')[:3]
