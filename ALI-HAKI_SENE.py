@@ -12,11 +12,11 @@ from datetime import datetime
 import re
 import uuid
 import warnings
+import requests
 
 # Configuration des warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning, message="coroutine 'expire_cache' was never awaited")
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
-
 
 # Configuration de la page
 st.set_page_config(
@@ -28,7 +28,11 @@ st.set_page_config(
 # ---- CONSTANTS ----
 DATA_PATH = "data/user_ratings_genres_mov.csv"
 USERS_DIR = "data/users"
-USER_RATINGS_PATH = "data/user_ratings_updated.csv"  # Nouveau fichier pour les données combinées
+USER_RATINGS_PATH = "data/user_ratings_updated.csv"
+TMDB_API_KEY = "2ba15ae1f0efd5257e6b44cb8bad748a"
+BASE_URL_TMDB = "https://api.themoviedb.org/3"
+IMAGE_BASE_URL_TMDB = "https://image.tmdb.org/t/p/w500"
+DEFAULT_POSTER = "https://via.placeholder.com/200x300?text=Poster+Indisponible"
 os.makedirs(USERS_DIR, exist_ok=True)
 
 # ---- STYLES ----
@@ -47,6 +51,11 @@ def load_css():
             color: white;
             border-radius: 8px;
             padding: 0.5rem 1rem;
+            transition: all 0.3s;
+        }
+        .stButton>button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
         .stTextInput>div>div>input {
             border: 2px solid #4CAF50 !important;
@@ -54,15 +63,90 @@ def load_css():
         }
         .movie-card {
             border-radius: 10px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
             background-color: white;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        .movie-card:hover {
+            transform: translateY(-5px) scale(1.02);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }
+        .movie-poster-container {
+            position: relative;
+            overflow: hidden;
+            border-radius: 8px;
+            height: 0;
+            padding-bottom: 150%;
+        }
+        .movie-poster {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.5s ease;
+        }
+        .movie-card:hover .movie-poster {
+            transform: scale(1.05);
+        }
+        .movie-info {
+            padding: 1rem 0.5rem;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .movie-title {
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+            color: #333;
+            line-height: 1.3;
+            height: 2.6rem;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        .movie-genres {
+            color: #666;
+            font-size: 0.8rem;
+            margin-bottom: 0.8rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+        }
+        .genre-tag {
+            background-color: #e0f2fe;
+            color: #0369a1;
+            padding: 0.2rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            white-space: nowrap;
+        }
+        .movie-score {
+            display: flex;
+            align-items: center;
+            font-weight: 600;
+            color: #4CAF50;
+            margin-top: auto;
+            font-size: 0.9rem;
+        }
+        .rating-stars {
+            color: #FFD700;
+            margin-right: 0.3rem;
+            font-size: 0.9rem;
         }
         .profile-header {
             display: flex;
             align-items: center;
             margin-bottom: 2rem;
+            animation: fadeIn 0.8s ease;
         }
         .profile-avatar {
             width: 80px;
@@ -70,16 +154,135 @@ def load_css():
             border-radius: 50%;
             object-fit: cover;
             margin-right: 1.5rem;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
         .recommendation-type {
-            margin: 2rem 0 1rem 0;
+            margin: 2rem 0 1.5rem 0;
             padding-bottom: 0.5rem;
             border-bottom: 2px solid #4CAF50;
+            font-size: 1.2rem;
+            color: #2e3b4e;
+            animation: slideIn 0.5s ease;
         }
+        .recommendation-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 3rem;
+        }
+        @media (max-width: 1200px) {
+            .recommendation-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        @media (max-width: 800px) {
+            .recommendation-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes slideIn {
+            from { 
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to { 
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        @keyframes cardEntrance {
+            from {
+                opacity: 0;
+                transform: scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        .movie-card {
+            animation: cardEntrance 0.5s ease;
+            animation-fill-mode: backwards;
+        }
+        .movie-card:nth-child(1) { animation-delay: 0.1s; }
+        .movie-card:nth-child(2) { animation-delay: 0.2s; }
+        .movie-card:nth-child(3) { animation-delay: 0.3s; }
+        .movie-card:nth-child(4) { animation-delay: 0.4s; }
+        .movie-card:nth-child(5) { animation-delay: 0.5s; }
+        .movie-card:nth-child(6) { animation-delay: 0.6s; }
     </style>
     """, unsafe_allow_html=True)
 
 load_css()
+
+# ---- TMDB FUNCTIONS ----
+@st.cache_data(ttl=3600)
+def get_movie_poster(movie_title):
+    """Récupère l'affiche du film depuis TMDB"""
+    try:
+        # Recherche du film
+        search_url = f"{BASE_URL_TMDB}/search/movie"
+        params = {
+            "api_key": TMDB_API_KEY,
+            "query": movie_title,
+            "language": "fr-FR"
+        }
+        response = requests.get(search_url, params=params)
+        response.raise_for_status()
+        
+        results = response.json().get("results", [])
+        if not results:
+            return DEFAULT_POSTER
+        
+        # Prendre le premier résultat
+        poster_path = results[0].get("poster_path")
+        if not poster_path:
+            return DEFAULT_POSTER
+            
+        return f"{IMAGE_BASE_URL_TMDB}{poster_path}"
+    except:
+        return DEFAULT_POSTER
+
+@st.cache_data(ttl=3600)
+def get_movie_details(movie_title):
+    """Récupère les détails du film depuis TMDB"""
+    try:
+        # Recherche du film
+        search_url = f"{BASE_URL_TMDB}/search/movie"
+        params = {
+            "api_key": TMDB_API_KEY,
+            "query": movie_title,
+            "language": "fr-FR"
+        }
+        response = requests.get(search_url, params=params)
+        response.raise_for_status()
+        
+        results = response.json().get("results", [])
+        if not results:
+            return None
+        
+        # Prendre le premier résultat
+        movie_id = results[0].get("id")
+        if not movie_id:
+            return None
+            
+        # Récupérer les détails complets
+        details_url = f"{BASE_URL_TMDB}/movie/{movie_id}"
+        details_params = {
+            "api_key": TMDB_API_KEY,
+            "language": "fr-FR",
+            "append_to_response": "credits"
+        }
+        details_response = requests.get(details_url, params=details_params)
+        details_response.raise_for_status()
+        
+        return details_response.json()
+    except:
+        return None
 
 # ---- AUTHENTICATION ----
 def hash_password(password: str) -> str:
@@ -188,7 +391,7 @@ class RecommenderSystem:
             values='rating'
         ).fillna(0)
     
-    def content_based_recommendations(self, movie_title: str, n=5) -> pd.DataFrame:
+    def content_based_recommendations(self, movie_title: str, n=6) -> pd.DataFrame:
         """Recommandations basées sur les genres sans doublons"""
         try:
             # Trouver l'index du film de référence
@@ -226,7 +429,7 @@ class RecommenderSystem:
             st.error(f"Erreur dans les recommandations: {str(e)}")
             return pd.DataFrame()
 
-    def collaborative_user_item(self, user_id: str, n=5) -> pd.DataFrame:
+    def collaborative_user_item(self, user_id: str, n=6) -> pd.DataFrame:
         """Recommandation collaborative User-Item"""
         try:
             # Trouver les utilisateurs similaires
@@ -237,8 +440,7 @@ class RecommenderSystem:
                 return pd.DataFrame()
                 
             distances, indices = knn.kneighbors(
-                self.user_item_matrix.loc[user_id].values.reshape(1, -1)
-            )
+                self.user_item_matrix.loc[user_id].values.reshape(1, -1))
             
             # Obtenir les films notés par les voisins mais pas par l'utilisateur
             similar_users = self.user_item_matrix.index[indices.flatten()]
@@ -251,11 +453,11 @@ class RecommenderSystem:
             return pd.DataFrame({
                 'movie_title': top_movies.index,
                 'predicted_rating': top_movies.values
-            })
+            }).merge(self.df[['movie_title', 'genres']].drop_duplicates(), on='movie_title')
         except:
             return pd.DataFrame()
 
-    def collaborative_item_user(self, user_ratings: dict, n=5) -> pd.DataFrame:
+    def collaborative_item_user(self, user_ratings: dict, n=6) -> pd.DataFrame:
         """Recommandation collaborative Item-User"""
         try:
             # Créer une matrice de similarité entre films
@@ -292,11 +494,11 @@ class RecommenderSystem:
             return pd.DataFrame(
                 predictions[:n], 
                 columns=['movie_title', 'predicted_rating']
-            )
+            ).merge(self.df[['movie_title', 'genres']].drop_duplicates(), on='movie_title')
         except:
             return pd.DataFrame()
 
-    def nmf_recommendations(self, user_id: str, n=5) -> pd.DataFrame:
+    def nmf_recommendations(self, user_id: str, n=6) -> pd.DataFrame:
         """Recommandation par NMF"""
         try:
             model = NMF(n_components=10, init='random', random_state=42)
@@ -321,11 +523,11 @@ class RecommenderSystem:
             return pd.DataFrame({
                 'movie_title': predictions.sort_values(ascending=False).head(n).index,
                 'predicted_rating': predictions.sort_values(ascending=False).head(n).values
-            })
+            }).merge(self.df[['movie_title', 'genres']].drop_duplicates(), on='movie_title')
         except:
             return pd.DataFrame()
 
-    def svd_recommendations(self, user_id: str, n=5) -> pd.DataFrame:
+    def svd_recommendations(self, user_id: str, n=6) -> pd.DataFrame:
         """Recommandation par SVD"""
         try:
             model = TruncatedSVD(n_components=10, random_state=42)
@@ -349,11 +551,74 @@ class RecommenderSystem:
             return pd.DataFrame({
                 'movie_title': predictions.sort_values(ascending=False).head(n).index,
                 'predicted_rating': predictions.sort_values(ascending=False).head(n).values
-            })
+            }).merge(self.df[['movie_title', 'genres']].drop_duplicates(), on='movie_title')
         except:
             return pd.DataFrame()
 
 # ---- INTERFACE SECTIONS ----
+def display_movie_card(movie_title, genres, score, score_label="Score"):
+    """Affiche une carte de film avec son poster et ses informations"""
+    poster_url = get_movie_poster(movie_title)
+    genres_list = genres.split('|') if genres else []
+    
+    with st.container():
+        st.markdown(f"""
+        <div class="movie-card">
+            <div class="movie-poster-container">
+                <img src="{poster_url}" class="movie-poster" onerror="this.src='{DEFAULT_POSTER}'">
+            </div>
+            <div class="movie-info">
+                <div class="movie-title">{movie_title}</div>
+                <div class="movie-genres">
+                    {''.join([f'<span class="genre-tag">{genre}</span>' for genre in genres_list[:3]])}
+                </div>
+                <div class="movie-score">
+                    <span class="rating-stars">{"⭐" * int(round(score))}</span>
+                    {score_label}: {score:.2f}
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+def display_recommendation_grid(recommendations, score_label="Score"):
+    """Affiche une grille de recommandations avec des cartes de taille égale"""
+    if recommendations.empty:
+        st.warning("Aucune recommandation disponible")
+        return
+    
+    # Création de la grille 3x2
+    rows = [recommendations.iloc[i:i+3] for i in range(0, min(6, len(recommendations)), 3)]
+    
+    for row in rows:
+        cols = st.columns(3)
+        for i, (_, movie) in enumerate(row.iterrows()):
+            with cols[i]:
+                poster_url = get_movie_poster(movie['movie_title'])
+                genres_list = movie.get('genres', '').split('|') if 'genres' in movie else []
+                
+                # Utilisation de CSS pour forcer une hauteur fixe
+                st.markdown(f"""
+                <div class="movie-card" style="height: 500px; display: flex; flex-direction: column;">
+                    <div class="movie-poster-container" style="height: 300px; overflow: hidden;">
+                        <img src="{poster_url}" class="movie-poster" 
+                             style="width: 100%; height: 100%; object-fit: cover;"
+                             onerror="this.src='{DEFAULT_POSTER}'">
+                    </div>
+                    <div class="movie-info" style="flex: 1; display: flex; flex-direction: column;">
+                        <div class="movie-title" style="font-size: 1rem; line-height: 1.2; margin-bottom: 8px;">
+                            {movie['movie_title']}
+                        </div>
+                        <div class="movie-genres" style="margin-bottom: 8px;">
+                            {''.join([f'<span style="background-color: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; margin-right: 4px; display: inline-block;">{genre}</span>' for genre in genres_list[:2]])}
+                        </div>
+                        <div class="movie-score" style="margin-top: auto;">
+                            <span style="color: #FFD700;">{"⭐" * int(round(movie.get('similarity_score', movie.get('predicted_rating', 0))))}</span>
+                            <span style="color: #4CAF50; font-weight: 500;">{score_label}: {movie.get('similarity_score', movie.get('predicted_rating', 0)):.2f}</span>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
 def login_section():
     """Affiche le formulaire de connexion"""
     with st.form("login_form"):
@@ -399,7 +664,7 @@ def register_section():
                     "last_name": last_name,
                     "email": email,
                     "password": hash_password(password),
-                    "user_id": generate_user_id(),  # Ce champ est essentiel
+                    "user_id": generate_user_id(),
                     "created_at": datetime.now().isoformat(),
                     "ratings": {}
                 }
@@ -475,14 +740,20 @@ def profile_section():
             # Affichage des notes existantes
             st.subheader("Mes films notés (3 maximum)")
             if user['ratings']:
-                for movie, rating in user['ratings'].items():
-                    cols = st.columns([0.7, 0.2, 0.1])
-                    cols[0].write(movie)
-                    cols[1].write("⭐" * rating)
-                    if cols[2].button("✕", key=f"del_{movie}"):
-                        user['ratings'].pop(movie)
-                        save_user(user['email'], user)
-                        st.rerun()
+                cols = st.columns(3)
+                for i, (movie, rating) in enumerate(user['ratings'].items()):
+                    movie_data = df[df['movie_title'] == movie].iloc[0]
+                    with cols[i % 3]:
+                        poster_url = get_movie_poster(movie)
+                        st.image(poster_url, use_column_width=True)
+                        st.write(f"**{movie}**")
+                        st.write(f"⭐" * rating)
+                        genres = movie_data['genres'].split('|')[:3]
+                        st.write(" ".join([f"`{g}`" for g in genres]))
+                        if st.button("Supprimer", key=f"del_{movie}"):
+                            user['ratings'].pop(movie)
+                            save_user(user['email'], user)
+                            st.rerun()
             else:
                 st.info("Vous n'avez pas encore noté de films")
 
@@ -512,58 +783,27 @@ def recommendations_section():
     
     st.header("🍿 Recommandations pour vous")
     
-    # Recommandation basée sur le contenu
+    # Recommandation basée sur le contenu - 3x2 grid
     st.markdown('<div class="recommendation-type">🎭 Basées sur le contenu (genres similaires)</div>', unsafe_allow_html=True)
     content_recs = recommender.content_based_recommendations(best_movie)
-    if not content_recs.empty:
-        for _, row in content_recs.iterrows():
-            with st.container(border=True):
-                st.markdown(f"**{row['movie_title']}**")
-                st.caption(f"Genres: {row['genres']}")
-                st.caption(f"Score de similarité: {row['similarity_score']:.2f}")
-    else:
-        st.warning("Aucune recommandation basée sur le contenu disponible")
+    display_recommendation_grid(content_recs, "Similarité")
     
-    # Recommandations collaboratives
+    # Autres recommandations
     st.markdown('<div class="recommendation-type">👥 Collaboratives (User-Item)</div>', unsafe_allow_html=True)
     user_item_recs = recommender.collaborative_user_item(user['user_id'])
-    if not user_item_recs.empty:
-        for _, row in user_item_recs.iterrows():
-            with st.container(border=True):
-                st.markdown(f"**{row['movie_title']}**")
-                st.caption(f"Note prédite: {row['predicted_rating']:.2f}")
-    else:
-        st.warning("Aucune recommandation collaborative User-Item disponible")
+    display_recommendation_grid(user_item_recs, "Note prédite")
     
     st.markdown('<div class="recommendation-type">🎬 Collaboratives (Item-User)</div>', unsafe_allow_html=True)
     item_user_recs = recommender.collaborative_item_user(user['ratings'])
-    if not item_user_recs.empty:
-        for _, row in item_user_recs.iterrows():
-            with st.container(border=True):
-                st.markdown(f"**{row['movie_title']}**")
-                st.caption(f"Note prédite: {row['predicted_rating']:.2f}")
-    else:
-        st.warning("Aucune recommandation collaborative Item-User disponible")
+    display_recommendation_grid(item_user_recs, "Note prédite")
     
     st.markdown('<div class="recommendation-type">🔢 NMF (Factorisation de matrices)</div>', unsafe_allow_html=True)
     nmf_recs = recommender.nmf_recommendations(user['user_id'])
-    if not nmf_recs.empty:
-        for _, row in nmf_recs.iterrows():
-            with st.container(border=True):
-                st.markdown(f"**{row['movie_title']}**")
-                st.caption(f"Note prédite: {row['predicted_rating']:.2f}")
-    else:
-        st.warning("Aucune recommandation NMF disponible")
+    display_recommendation_grid(nmf_recs, "Note prédite")
     
     st.markdown('<div class="recommendation-type">📊 SVD (Décomposition en valeurs singulières)</div>', unsafe_allow_html=True)
     svd_recs = recommender.svd_recommendations(user['user_id'])
-    if not svd_recs.empty:
-        for _, row in svd_recs.iterrows():
-            with st.container(border=True):
-                st.markdown(f"**{row['movie_title']}**")
-                st.caption(f"Note prédite: {row['predicted_rating']:.2f}")
-    else:
-        st.warning("Aucune recommandation SVD disponible")
+    display_recommendation_grid(svd_recs, "Note prédite")
 
 # ---- MAIN APP ----
 def main():
